@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/*
+ * The bridge between your theme (src/theme.ts) and Tailwind. The layout
+ * sets --paper, --ink, etc. as CSS variables from your chosen palette;
+ * these @theme inline mappings turn them into Tailwind utilities like
+ * bg-paper, text-ink, border-line, bg-accent. You shouldn't need to edit
+ * this file; change src/theme.ts instead.
+ */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --font-heading: var(--heading-font);
+  --font-body: var(--body-font);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body-font);
+  /* A real typographic rhythm: comfortable measure and line height. */
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--heading-font);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}

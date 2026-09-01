@@ -1,0 +1,23 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# env files: NEVER commit these; they hold your keys and token
+.env*
+# ...except the example file, which lists the NAMES your site needs (no values)
+!.env.example
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
