@@ -16,33 +16,34 @@
 
 export const profile = {
   /** Your name as you want it to appear everywhere. */
-  displayName: "Your Name",
+  displayName: "Luke McAnally",
 
   /** Your UD email — must match the one you signed into the course with. */
-  email: "you@udel.edu",
+  email: "lukemc@udel.edu",
 
   /** Where you're from. Shows on your roster card and /about. */
-  hometown: "Newark, Delaware",
+  hometown: "Havertown, Pennsylvania",
 
   /**
    * 2 to 4 fun facts (the grader checks the count!). Real ones: they're
    * how classmates find something to say hello about.
    */
   funFacts: [
-    "I once assembled IKEA furniture without leftover screws.",
-    "I can name every U.S. state capital in under two minutes.",
+    "I have caught two fish unintentionally in the pocket of my bathing suit.",
+    "I do reviews on a second Instagram account.",
+    "I have solved the New York Times wordle in one attempt."
   ],
 
   /** One decision you're proud of, in a sentence. */
   decisionImProudOf:
-    "I chose to take a gap semester to work retail; it taught me more about customers than any textbook.",
+    "Improving my clothing selection and spending habits",
 
   /**
    * Your photo. Replace public/photo.svg with a real photo of you
    * (e.g. put photo.jpg in the public/ folder and change this to "/photo.jpg").
    * It must be a real image file: the grader fetches it and checks.
    */
-  photoPath: "/photo.svg",
+  photoPath: "/realpfp.jpg",
 
   /**
    * Who can see your roster card:
@@ -52,13 +53,13 @@ export const profile = {
   rosterVisibility: "class" as "class" | "professor-only",
 
   /** A one-line tagline for your home page. Make it yours. */
-  tagline: "Building a portfolio of decision services, one lane at a time.",
+  tagline: "Working to become an efficent and effective decision maker in the age of artificial intelligence.",
 
   /**
    * A short bio for your home page: two or three sentences, written like
    * a person, not a resume. What are you studying? What do you care about?
    */
-  bio: "I'm a business student at the University of Delaware learning to make good decisions at any scale. This site is my working portfolio: every course challenge deploys here as a live service.",
+  bio: "I am an aspiring business analyst at the University of Delaware with an interest in decison making and artificial intelligence. I care about making other people's lives easier and more efficient. Looking to have fun and help people in the process.",
 
   /**
    * Your GitHub repo URL. The course platform reads this from /api/health to
