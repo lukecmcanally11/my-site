@@ -1,6 +1,6 @@
 # Your Decision Services Site
 
-This is your site for **Good Decisions at Any Scale**: the one you deploy in
+This is the site used for **Good Decisions at Any Scale**: the one you deploy in
 Station 1.3 and keep alive all semester. It starts out working: fill in your
 name and env vars and every Challenge 1 check passes. Every later challenge
 plugs into a clearly-marked slot.
