@@ -123,3 +123,4 @@ coherent palette, typography picked on purpose, real imagery. This template
 is tasteful out of the box, but out-of-the-box is exactly what the bonus
 isn't for. `src/theme.ts` and [THEME.md](./THEME.md) exist so you can make
 real choices without learning CSS.
+Project Overview: Create a runnign website with live updates.
