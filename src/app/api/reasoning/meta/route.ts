@@ -1,13 +1,9 @@
-import { notBuiltYet } from "@/lib/not-built-yet";
+import { NextResponse } from "next/server";
 
-/**
- * ── TODO: Lane 2 — Challenge 2, "Reasoning & Uncertainty Service" ────────
- * You'll build this after Chapters 5–9. The challenge page on the course
- * platform publishes the wire contract (the exact JSON to send and receive).
- * This route proves the service is yours by answering
- * { ok: true, studentToken, service: "reasoning" }.
- * Until then it returns 501 so probes honestly fail.
- */
 export async function GET() {
-  return notBuiltYet(2, "Reasoning & Uncertainty Service");
+  return NextResponse.json({
+    service: "reasoning", // which decision service is answering
+    specVersion: "1", // which version of the problem format it speaks
+    studentToken: process.env.SITE_TOKEN, // proves this service is yours
+  });
 }
