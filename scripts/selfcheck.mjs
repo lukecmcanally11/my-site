@@ -4,7 +4,10 @@
  *
  * Probes YOUR site with the same Challenge 1 checks the course platform
  * runs, and tells you what to fix in plain language. Node builtins only;
- * nothing to install beyond the template itself.
+ * nothing to install beyond the template itself. Once your reasoning
+ * service answers (Challenge 2, after Lane 2), a Challenge 2 section runs
+ * automatically: meta handshake, nine sample problems, and the /reasoning
+ * page's live-data binding.
  *
  *   npm run selfcheck                                  # local dev server
  *   npm run selfcheck -- https://your-site.vercel.app  # your deployed site
@@ -127,7 +130,7 @@ let repoUrl = null;
         console.log(`      \u00b7 database: ${db}`);
       } else if (db === "not configured") {
         console.log(
-          "      \u00b7 database: not configured — add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (Chapter 3, Step 5); the guestbook check below will fail until you do"
+          "      \u00b7 database: not configured — add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (Chapter 3, Step 5); if you already pasted them, check the variable NAMES character-for-character against .env.example — a paste from Supabase may have named the key differently; the guestbook check below will fail until this is fixed"
         );
       } else if (db.startsWith("error")) {
         console.log(
@@ -391,10 +394,312 @@ let profile = null;
 
 const challenge1Failures = results.filter((r) => !r.ok).length;
 
+// ── Challenge 2: runs once your /api/reasoning/meta answers 200 ─────────────
+// Until then, that route stays in the "honest stubs" list below. These checks
+// reimplement the platform's Challenge 2 grader the same way the checks above
+// reimplement Challenge 1's (course-platform/src/lib/challenges/reasoning.ts).
+const c2 = [];
+function report2(ok, label, detail) {
+  c2.push({ ok, label, detail });
+  const mark = ok ? "\u2713" : "\u2717";
+  console.log(`  ${mark} ${label}`);
+  if (!ok && detail) console.log(`      ${detail}`);
+}
+
+function solveReasoning(problem) {
+  if (problem.type === "syllogism") {
+    const forms = {
+      A: { verdict: "valid" },
+      "not-B": { verdict: "valid" },
+      B: { verdict: "invalid", fallacy: "affirming the consequent" },
+      "not-A": { verdict: "invalid", fallacy: "denying the antecedent" },
+    };
+    return forms[problem.observation.asserts];
+  }
+  if (problem.type === "plausibility") {
+    const t = problem.baseRate * problem.hitRate;
+    const f = (1 - problem.baseRate) * problem.falseAlarmRate;
+    return { posterior: t / (t + f) };
+  }
+  const { theta, payoffs, probabilityOf } = problem;
+  return {
+    support: [0, 1],
+    expectedValue: theta * payoffs.onSuccess + (1 - theta) * payoffs.onFailure,
+    probabilityStatement: probabilityOf === 1 ? theta : 1 - theta,
+  };
+}
+
+function asNum(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+  return null;
+}
+
+/** Returns null when the answer would pass the platform's grader, else why. */
+function gradeReasoning(problem, answer) {
+  const truth = solveReasoning(problem);
+  if (problem.type === "syllogism") {
+    if (answer?.verdict !== truth.verdict) {
+      return `verdict was "${String(answer?.verdict)}", the structure says "${truth.verdict}"`;
+    }
+    if (truth.verdict === "invalid") {
+      const s = String(answer?.fallacy ?? "").toLowerCase();
+      const named =
+        /affirm/.test(s) && /consequent/.test(s)
+          ? "affirming the consequent"
+          : /den(y|i)/.test(s) && /antecedent/.test(s)
+            ? "denying the antecedent"
+            : null;
+      if (named !== truth.fallacy) {
+        return `fallacy was "${String(answer?.fallacy ?? "(missing)")}", this structure commits "${truth.fallacy}"`;
+      }
+    }
+    return null;
+  }
+  if (problem.type === "plausibility") {
+    const p = asNum(answer?.posterior);
+    if (p === null) return "no numeric `posterior` in the response";
+    if (Math.abs(p - truth.posterior) > 0.01) {
+      return `posterior ${p} is outside \u00b10.01 of the correct value`;
+    }
+    return null;
+  }
+  const s = answer?.support;
+  if (!Array.isArray(s) || s.length !== 2 || Number(s[0]) !== 0 || Number(s[1]) !== 1) {
+    return "`support` must be the array [0, 1]";
+  }
+  const ev = asNum(answer?.expectedValue);
+  if (ev === null) return "no numeric `expectedValue` in the response";
+  if (Math.abs(ev - truth.expectedValue) > 0.01) {
+    return `expectedValue ${ev} is outside \u00b10.01 of the correct value`;
+  }
+  const ps = asNum(answer?.probabilityStatement);
+  if (ps === null) return "no numeric `probabilityStatement` in the response";
+  if (Math.abs(ps - truth.probabilityStatement) > 0.01) {
+    return `probabilityStatement ${ps} is outside \u00b10.01 of the correct value`;
+  }
+  return null;
+}
+
+// Fixed sample problems, three per type. The real battery sends 30 with
+// fresh seeded parameters; formulas that pass these pass those.
+const C2_PROBLEMS = [
+  {
+    probeId: "selfcheck-syllogism-1",
+    type: "syllogism",
+    rule: { if: "we cut the price", then: "unit sales rise" },
+    observation: { statement: "We observe that we cut the price.", asserts: "A" },
+    conclusion: { statement: "Therefore, unit sales rise.", asserts: "B" },
+  },
+  {
+    probeId: "selfcheck-syllogism-2",
+    type: "syllogism",
+    rule: { if: "the ad campaign runs", then: "the landing page gets traffic" },
+    observation: {
+      statement: "We observe that it is NOT the case that the landing page gets traffic.",
+      asserts: "not-B",
+    },
+    conclusion: {
+      statement: "Therefore, it is not the case that the ad campaign runs.",
+      asserts: "not-A",
+    },
+  },
+  {
+    probeId: "selfcheck-syllogism-3",
+    type: "syllogism",
+    rule: { if: "we cut the price", then: "unit sales rise" },
+    observation: { statement: "We observe that unit sales rise.", asserts: "B" },
+    conclusion: { statement: "Therefore, we cut the price.", asserts: "A" },
+  },
+  {
+    probeId: "selfcheck-plausibility-1",
+    type: "plausibility",
+    scenario:
+      "2% of transactions are fraudulent. The system catches 90% of fraudulent transactions and false-alarms on 10% of the rest. One has just been flagged.",
+    baseRate: 0.02,
+    hitRate: 0.9,
+    falseAlarmRate: 0.1,
+  },
+  {
+    probeId: "selfcheck-plausibility-2",
+    type: "plausibility",
+    scenario:
+      "5% of units are defective. The scanner catches 80% of defective units and false-alarms on 6% of the rest. One has just been flagged.",
+    baseRate: 0.05,
+    hitRate: 0.8,
+    falseAlarmRate: 0.06,
+  },
+  {
+    probeId: "selfcheck-plausibility-3",
+    type: "plausibility",
+    scenario:
+      "1% of accounts are about to churn. The model catches 95% of churning accounts and false-alarms on 3% of the rest. One has just been flagged.",
+    baseRate: 0.01,
+    hitRate: 0.95,
+    falseAlarmRate: 0.03,
+  },
+  {
+    probeId: "selfcheck-bernoulli-1",
+    type: "bernoulli",
+    scenario:
+      "X = 1 when the ad gets clicked (probability theta = 0.35). Payoff is $120 when X = 1 and $-40 when X = 0.",
+    theta: 0.35,
+    payoffs: { onSuccess: 120, onFailure: -40 },
+    probabilityOf: 0,
+  },
+  {
+    probeId: "selfcheck-bernoulli-2",
+    type: "bernoulli",
+    scenario:
+      "X = 1 when the shipment arrives on time (probability theta = 0.6). Payoff is $80 when X = 1 and $-30 when X = 0.",
+    theta: 0.6,
+    payoffs: { onSuccess: 80, onFailure: -30 },
+    probabilityOf: 1,
+  },
+  {
+    probeId: "selfcheck-bernoulli-3",
+    type: "bernoulli",
+    scenario:
+      "X = 1 when the customer buys the upsell (probability theta = 0.22). Payoff is $150 when X = 1 and $-90 when X = 0.",
+    theta: 0.22,
+    payoffs: { onSuccess: 150, onFailure: -90 },
+    probabilityOf: 0,
+  },
+];
+
+let challenge2Built = false;
+{
+  const res = await get("/api/reasoning/meta");
+  if (res.status === 200) {
+    challenge2Built = true;
+    console.log("\nChallenge 2 checks (your reasoning service is live):");
+
+    // 1. The meta handshake.
+    const body = json(res.text);
+    if (!body || body.service !== "reasoning") {
+      report2(
+        false,
+        "GET /api/reasoning/meta",
+        'response must be JSON of the form { service: "reasoning", specVersion: "1", studentToken }'
+      );
+    } else if (String(body.specVersion) !== "1") {
+      report2(
+        false,
+        "GET /api/reasoning/meta",
+        `specVersion must be "1" (got "${String(body.specVersion)}")`
+      );
+    } else if (!body.studentToken || body.studentToken === "SITE_TOKEN-env-var-not-set") {
+      report2(
+        false,
+        "GET /api/reasoning/meta",
+        "studentToken is missing: the route must return process.env.SITE_TOKEN, and that env var must be set"
+      );
+    } else if (token && body.studentToken !== token) {
+      report2(
+        false,
+        "GET /api/reasoning/meta",
+        `the site's studentToken ("${body.studentToken}") doesn't match your local SITE_TOKEN ("${token}")`
+      );
+    } else {
+      report2(true, "GET /api/reasoning/meta: service announced, token present");
+    }
+
+    // 2. Nine decide probes, three per type. The platform's battery sends 30.
+    const lastAnswers = {};
+    const misses = [];
+    let correct = 0;
+    for (const problem of C2_PROBLEMS) {
+      const r = await get("/api/reasoning/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(problem),
+      });
+      let miss;
+      let answer = null;
+      if (r.error) {
+        miss = r.error;
+      } else if (!r.ok) {
+        miss = `HTTP ${r.status}`;
+      } else {
+        answer = json(r.text);
+        miss = answer === null ? "response was not valid JSON" : gradeReasoning(problem, answer);
+      }
+      if (miss === null) correct += 1;
+      else misses.push(`${problem.probeId}: ${miss}`);
+      lastAnswers[problem.type] = answer;
+    }
+    if (correct === C2_PROBLEMS.length) {
+      report2(true, `POST /api/reasoning/decide: ${correct}/${C2_PROBLEMS.length} sample problems correct`);
+    } else {
+      report2(
+        false,
+        `POST /api/reasoning/decide: ${correct}/${C2_PROBLEMS.length} sample problems correct`,
+        `first miss ${misses[0]} (run npm run try-reasoning for a side-by-side of yours vs correct)`
+      );
+    }
+
+    // 3. The /reasoning page displays the answers the API just gave.
+    const page = await get("/reasoning");
+    if (page.error || !page.ok) {
+      report2(false, "GET /reasoning", page.error ?? `returned HTTP ${page.status}`);
+    } else {
+      const readAttr = (key) => {
+        const m = page.text.match(
+          new RegExp(`<[^>]*data-reasoning="${key}"[^>]*>([^<]*)<`)
+        );
+        return m ? m[1].trim() : null;
+      };
+      const problems = [];
+
+      const verdictShown = readAttr("verdict");
+      const lastVerdict = lastAnswers.syllogism?.verdict;
+      if (verdictShown === null || verdictShown === "") {
+        problems.push('no element with data-reasoning="verdict"');
+      } else if (
+        typeof lastVerdict === "string" &&
+        verdictShown.toLowerCase() !== lastVerdict.toLowerCase()
+      ) {
+        problems.push(
+          `the page shows verdict "${verdictShown}" but the API just answered "${lastVerdict}"`
+        );
+      }
+
+      for (const b of [
+        { key: "posterior", type: "plausibility", field: "posterior" },
+        { key: "expected-value", type: "bernoulli", field: "expectedValue" },
+      ]) {
+        const shown = readAttr(b.key);
+        const answered = asNum(lastAnswers[b.type]?.[b.field]);
+        if (shown === null || shown === "") {
+          problems.push(`no element with data-reasoning="${b.key}"`);
+        } else if (answered !== null) {
+          const shownNum = Number.parseFloat(shown.replace(/[$,]/g, ""));
+          if (!Number.isFinite(shownNum) || Math.abs(shownNum - answered) > 0.005 + 1e-9) {
+            problems.push(
+              `data-reasoning="${b.key}" shows "${shown}" but the API just answered ${answered}`
+            );
+          }
+        }
+      }
+
+      if (problems.length === 0) {
+        report2(true, "/reasoning page: bound to the same live data the API serves");
+      } else {
+        report2(
+          false,
+          "/reasoning page bound to live data",
+          `${problems.join("; ")}. The page must render the latest saved answers (lib/reasoning-store), not fixed text`
+        );
+      }
+    }
+  }
+}
+const challenge2Failures = c2.filter((r) => !r.ok).length;
+
 // ── Later-lane stubs: these SHOULD fail until their lane ────────────────────
 console.log("\nLater-lane stubs (these should NOT pass yet — 501 is correct):");
 const stubs = [
-  ["/api/reasoning/meta", "Lane 2"],
+  ...(challenge2Built ? [] : [["/api/reasoning/meta", "Lane 2"]]),
   ["/api/simulator/meta", "Lane 3"],
   ["/api/causality/meta", "Lane 4"],
   ["/api/capstone/meta", "Lane 5"],
@@ -416,17 +721,28 @@ for (const [path, lane] of stubs) {
 
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log("");
-if (challenge1Failures === 0 && stubProblems === 0) {
-  console.log("All Challenge 1 checks pass. Deploy, register on the course platform,");
-  console.log("and run the real probe battery from the Challenge 1 page.");
+if (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0) {
+  if (challenge2Built) {
+    console.log("All Challenge 1 and Challenge 2 checks pass. Deploy, then run the");
+    console.log("real probe battery from the Challenge 2 page on the course platform.");
+  } else {
+    console.log("All Challenge 1 checks pass. Deploy, register on the course platform,");
+    console.log("and run the real probe battery from the Challenge 1 page.");
+  }
   console.log("(Selfcheck can't check one thing: that /api/whoami's email matches your");
   console.log("course sign-in. And remember: beauty is graded by a human, not a script.)");
   process.exit(0);
 } else {
-  console.log(
-    `${challenge1Failures} Challenge 1 check${challenge1Failures === 1 ? "" : "s"} failing${
-      stubProblems > 0 ? ` (and ${stubProblems} stub problem${stubProblems === 1 ? "" : "s"})` : ""
-    }. Fix the items marked \u2717 above and run selfcheck again.`
-  );
+  const parts = [];
+  if (challenge1Failures > 0) {
+    parts.push(`${challenge1Failures} Challenge 1 check${challenge1Failures === 1 ? "" : "s"}`);
+  }
+  if (challenge2Failures > 0) {
+    parts.push(`${challenge2Failures} Challenge 2 check${challenge2Failures === 1 ? "" : "s"}`);
+  }
+  if (stubProblems > 0) {
+    parts.push(`${stubProblems} stub problem${stubProblems === 1 ? "" : "s"}`);
+  }
+  console.log(`${parts.join(" and ")} failing. Fix the items marked \u2717 above and run selfcheck again.`);
   process.exit(1);
 }

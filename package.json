@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "selfcheck": "node scripts/selfcheck.mjs"
+    "selfcheck": "node scripts/selfcheck.mjs",
+    "try-reasoning": "node scripts/try-reasoning.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",
