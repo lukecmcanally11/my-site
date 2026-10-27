@@ -7,7 +7,9 @@
  * nothing to install beyond the template itself. Once your reasoning
  * service answers (Challenge 2, after Lane 2), a Challenge 2 section runs
  * automatically: meta handshake, nine sample problems, and the /reasoning
- * page's live-data binding.
+ * page's live-data binding. Once your decision simulator answers
+ * (Challenge 3, after Lane 3), a Challenge 3 section runs the same way:
+ * meta handshake, three sample games, the /simulator page, and its DAG image.
  *
  *   npm run selfcheck                                  # local dev server
  *   npm run selfcheck -- https://your-site.vercel.app  # your deployed site
@@ -696,11 +698,223 @@ let challenge2Built = false;
 }
 const challenge2Failures = c2.filter((r) => !r.ok).length;
 
+// ── Challenge 3: runs once your /api/simulator/meta answers 200 ─────────────
+// Same idea as Challenge 2: a small reimplementation of the platform's
+// Challenge 3 grader (course-platform/src/lib/challenges/simulator.ts and
+// src/lib/dist-math.ts). The correct answers are exact; your simulated
+// numbers only need to land within the grader's tolerances.
+const c3 = [];
+function report3(ok, label, detail) {
+  c3.push({ ok, label, detail });
+  const mark = ok ? "\u2713" : "\u2717";
+  console.log(`  ${mark} ${label}`);
+  if (!ok && detail) console.log(`      ${detail}`);
+}
+
+function logGrowth(f, u, d) {
+  return 0.5 * Math.log(1 + u * f) + 0.5 * Math.log(1 - d * f);
+}
+
+function solveGame(game) {
+  const u = game.upPct / 100;
+  const d = game.downPct / 100;
+  const T = game.horizonYears;
+  const growth = game.candidateFractions.map((f) => logGrowth(f, u, d));
+  const f = game.candidateFractions[growth.indexOf(Math.max(...growth))];
+  let maxLosingHeads = -1;
+  for (let h = 0; h <= T; h++) {
+    if (h * Math.log(1 + u * f) + (T - h) * Math.log(1 - d * f) < 0) maxLosingHeads = h;
+  }
+  let probLoss = 0;
+  let c = 1;
+  for (let i = 0; i <= maxLosingHeads; i++) {
+    probLoss += c;
+    c = (c * (T - i)) / (i + 1);
+  }
+  probLoss /= 2 ** T;
+  return {
+    recommendedFraction: f,
+    medianFinalBalance: game.buyIn * Math.exp(T * logGrowth(f, u, d)),
+    probLoss,
+  };
+}
+
+/** Returns null when the answer would pass the platform's grader, else why. */
+function gradeGame(game, answer) {
+  const truth = solveGame(game);
+  const fraction = asNum(answer?.recommendedFraction);
+  const median = asNum(answer?.medianFinalBalance);
+  const pLoss = asNum(answer?.probLoss);
+  if (fraction === null) return "no numeric `recommendedFraction` in the response";
+  if (median === null) return "no numeric `medianFinalBalance` in the response";
+  if (pLoss === null) return "no numeric `probLoss` in the response";
+  if (typeof answer.reasoning !== "string" || answer.reasoning.trim().length < 10) {
+    return "`reasoning` must be a short plain-language sentence";
+  }
+  if (Math.abs(fraction - truth.recommendedFraction) > 1e-9) {
+    return `recommendedFraction ${fraction}, correct is ${truth.recommendedFraction}`;
+  }
+  if (Math.abs(median - truth.medianFinalBalance) > Math.max(1, truth.medianFinalBalance * 0.05)) {
+    return `medianFinalBalance ${Math.round(median)} is outside \u00b15% of the correct value`;
+  }
+  if (Math.abs(pLoss - truth.probLoss) > 0.03) {
+    return `probLoss ${pLoss} is outside \u00b10.03 of the correct value`;
+  }
+  return null;
+}
+
+// Fixed sample games (the same three npm run try-simulator sends). The real
+// battery sends 20 with fresh numbers; a service that passes these and
+// simulates honestly passes those.
+const C3_GAMES = [
+  { up: 50, down: 40, years: 30, buyIn: 30000, candidates: [0.1, 0.25, 0.5, 1.0] },
+  { up: 55, down: 40, years: 20, buyIn: 10000, candidates: [0.05, 0.2, 0.4, 0.8] },
+  { up: 45, down: 35, years: 40, buyIn: 50000, candidates: [0.05, 0.15, 0.35, 0.55, 0.85, 1.0] },
+].map((g, i) => ({
+  probeId: `selfcheck-game-${i + 1}`,
+  type: "investment-game",
+  scenario: `Buy in with $${g.buyIn.toLocaleString("en-US")}; each year a fair coin flips the STAKED portion +${g.up}% (heads) or -${g.down}% (tails), for ${g.years} years. Choose the stake fraction, from the candidates, that maximizes the growth of the typical (median) path, and report that strategy's median final balance and probability of ending below the buy-in.`,
+  upPct: g.up,
+  downPct: g.down,
+  horizonYears: g.years,
+  buyIn: g.buyIn,
+  candidateFractions: g.candidates,
+}));
+
+let challenge3Built = false;
+{
+  const res = await get("/api/simulator/meta");
+  if (res.status === 200) {
+    challenge3Built = true;
+    console.log("\nChallenge 3 checks (your decision simulator is live):");
+
+    // 1. The meta handshake.
+    const body = json(res.text);
+    if (!body || body.service !== "simulator") {
+      report3(
+        false,
+        "GET /api/simulator/meta",
+        'response must be JSON of the form { service: "simulator", specVersion: "1", studentToken }'
+      );
+    } else if (String(body.specVersion) !== "1") {
+      report3(false, "GET /api/simulator/meta", `specVersion must be "1" (got "${String(body.specVersion)}")`);
+    } else if (body.flavor !== undefined && body.flavor !== "investment-game") {
+      report3(
+        false,
+        "GET /api/simulator/meta",
+        `flavor is "${String(body.flavor)}". Leave the flavor field out (or set it to "investment-game")`
+      );
+    } else if (!body.studentToken || body.studentToken === "SITE_TOKEN-env-var-not-set") {
+      report3(
+        false,
+        "GET /api/simulator/meta",
+        "studentToken is missing: the route must return process.env.SITE_TOKEN, and that env var must be set"
+      );
+    } else if (token && body.studentToken !== token) {
+      report3(
+        false,
+        "GET /api/simulator/meta",
+        `the site's studentToken ("${body.studentToken}") doesn't match your local SITE_TOKEN ("${token}")`
+      );
+    } else {
+      report3(true, "GET /api/simulator/meta: service announced, token present");
+    }
+
+    // 2. Three decide probes. The platform's battery sends 20.
+    let lastAnswer = null;
+    const misses = [];
+    let correct = 0;
+    for (const game of C3_GAMES) {
+      const r = await get("/api/simulator/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(game),
+      });
+      let miss;
+      let answer = null;
+      if (r.error) {
+        miss = r.error;
+      } else if (!r.ok) {
+        miss = `HTTP ${r.status}`;
+      } else {
+        answer = json(r.text);
+        miss = answer === null ? "response was not valid JSON" : gradeGame(game, answer);
+      }
+      if (miss === null) correct += 1;
+      else misses.push(`${game.probeId}: ${miss}`);
+      lastAnswer = answer;
+    }
+    if (correct === C3_GAMES.length) {
+      report3(true, `POST /api/simulator/decide: ${correct}/${C3_GAMES.length} sample games correct`);
+    } else {
+      report3(
+        false,
+        `POST /api/simulator/decide: ${correct}/${C3_GAMES.length} sample games correct`,
+        `first miss ${misses[0]} (run npm run try-simulator for a side-by-side of yours vs correct)`
+      );
+    }
+
+    // 3. The /simulator page displays the answer the API just gave, plus the DAG.
+    const page = await get("/simulator");
+    if (page.error || !page.ok) {
+      report3(false, "GET /simulator", page.error ?? `returned HTTP ${page.status}`);
+    } else {
+      const readAttr = (key) => {
+        const m = page.text.match(new RegExp(`<[^>]*data-simulator="${key}"[^>]*>([^<]*)<`));
+        return m ? m[1].trim() : null;
+      };
+      const problems = [];
+      for (const b of [
+        { key: "recommended-fraction", field: "recommendedFraction", tolerance: 0.005 },
+        { key: "median-final", field: "medianFinalBalance", tolerance: 1 },
+        { key: "prob-loss", field: "probLoss", tolerance: 0.005 },
+      ]) {
+        const shown = readAttr(b.key);
+        const answered = asNum(lastAnswer?.[b.field]);
+        if (shown === null || shown === "") {
+          problems.push(`no element with data-simulator="${b.key}" (or it holds more than plain text)`);
+        } else if (answered !== null) {
+          const shownNum = Number.parseFloat(shown.replace(/[$,%\s]/g, ""));
+          if (!Number.isFinite(shownNum) || Math.abs(shownNum - answered) > b.tolerance + 1e-9) {
+            problems.push(`data-simulator="${b.key}" shows "${shown}" but the API just answered ${answered}`);
+          }
+        }
+      }
+
+      const imgTag = page.text.match(/<img\b[^>]*data-simulator="dag"[^>]*>/);
+      const src = imgTag ? (imgTag[0].match(/\bsrc="([^"]*)"/)?.[1] ?? "").replace(/&amp;/g, "&") : null;
+      if (src === null) {
+        problems.push('no <img data-simulator="dag"> (Step 5 of the build guide draws it)');
+      } else if (!src) {
+        problems.push('the data-simulator="dag" image has an empty src');
+      } else {
+        const img = await get(new URL(src, `${siteUrl}/simulator`).href);
+        if (img.error || !img.ok) {
+          problems.push(`the DAG image at "${src}" did not load (${img.error ?? `HTTP ${img.status}`})`);
+        } else if (!img.contentType.toLowerCase().startsWith("image/")) {
+          problems.push(`the DAG image at "${src}" is not an image (content-type "${img.contentType}")`);
+        }
+      }
+
+      if (problems.length === 0) {
+        report3(true, "/simulator page: shows the latest answer and a DAG image that loads");
+      } else {
+        report3(
+          false,
+          "/simulator page bound to live data",
+          `${problems.join("; ")}. The page must render the latest saved answer (lib/simulator-store), not fixed text`
+        );
+      }
+    }
+  }
+}
+const challenge3Failures = c3.filter((r) => !r.ok).length;
+
 // ── Later-lane stubs: these SHOULD fail until their lane ────────────────────
 console.log("\nLater-lane stubs (these should NOT pass yet — 501 is correct):");
 const stubs = [
   ...(challenge2Built ? [] : [["/api/reasoning/meta", "Lane 2"]]),
-  ["/api/simulator/meta", "Lane 3"],
+  ...(challenge3Built ? [] : [["/api/simulator/meta", "Lane 3"]]),
   ["/api/causality/meta", "Lane 4"],
   ["/api/capstone/meta", "Lane 5"],
 ];
@@ -721,8 +935,11 @@ for (const [path, lane] of stubs) {
 
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log("");
-if (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0) {
-  if (challenge2Built) {
+if (challenge1Failures === 0 && challenge2Failures === 0 && challenge3Failures === 0 && stubProblems === 0) {
+  if (challenge3Built) {
+    console.log("All Challenge 1, 2, and 3 checks pass. Deploy, then run the real");
+    console.log("probe battery from the Challenge 3 page on the course platform.");
+  } else if (challenge2Built) {
     console.log("All Challenge 1 and Challenge 2 checks pass. Deploy, then run the");
     console.log("real probe battery from the Challenge 2 page on the course platform.");
   } else {
@@ -739,6 +956,9 @@ if (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0) 
   }
   if (challenge2Failures > 0) {
     parts.push(`${challenge2Failures} Challenge 2 check${challenge2Failures === 1 ? "" : "s"}`);
+  }
+  if (challenge3Failures > 0) {
+    parts.push(`${challenge3Failures} Challenge 3 check${challenge3Failures === 1 ? "" : "s"}`);
   }
   if (stubProblems > 0) {
     parts.push(`${stubProblems} stub problem${stubProblems === 1 ? "" : "s"}`);
