@@ -8,7 +8,8 @@
     "start": "next start",
     "selfcheck": "node scripts/selfcheck.mjs",
     "try-reasoning": "node scripts/try-reasoning.mjs",
-    "try-simulator": "node scripts/try-simulator.mjs"
+    "try-simulator": "node scripts/try-simulator.mjs",
+    "try-causality": "node scripts/try-causality.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",

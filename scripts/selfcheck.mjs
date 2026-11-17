@@ -10,6 +10,12 @@
  * page's live-data binding. Once your decision simulator answers
  * (Challenge 3, after Lane 3), a Challenge 3 section runs the same way:
  * meta handshake, three sample games, the /simulator page, and its DAG image.
+ * Once your causality auditor answers (Challenge 4, after Lane 4), a
+ * Challenge 4 section adds four sample audits, the /causality page, and its
+ * DAG image. Once your capstone service answers (Challenge 5, after Lane 5),
+ * a Challenge 5 section sends your own problem (my-problem.json) and two
+ * practice problems, then checks the /capstone page's eight data-capstone
+ * elements.
  *
  *   npm run selfcheck                                  # local dev server
  *   npm run selfcheck -- https://your-site.vercel.app  # your deployed site
@@ -133,6 +139,10 @@ let repoUrl = null;
       } else if (db === "not configured") {
         console.log(
           "      \u00b7 database: not configured — add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (Chapter 3, Step 5); if you already pasted them, check the variable NAMES character-for-character against .env.example — a paste from Supabase may have named the key differently; the guestbook check below will fail until this is fixed"
+        );
+      } else if (/permission denied/i.test(db)) {
+        console.log(
+          `      \u00b7 database: ${db} — the table exists but its grant line was never run; in the Supabase SQL Editor, run the last line of supabase/guestbook.sql (grant select, insert on public.guestbook to anon;)`
         );
       } else if (db.startsWith("error")) {
         console.log(
@@ -347,11 +357,17 @@ let profile = null;
               true,
               "GitHub commit history — skipped (GitHub is unavailable from here; the real grader also skips this check when that happens)"
             );
+          } else if (res.status === 404 && (owner === "your-username" || repo === "your-repo")) {
+            report(
+              false,
+              "GitHub commit history",
+              `repoUrl is still the template's placeholder (github.com/${owner}/${repo}). Copy your repo's address from GitHub (like https://github.com/YOURNAME/my-site), paste it as repoUrl in src/profile.ts, save, then git add -A, git commit -m "Point repoUrl at my GitHub repo", and git push`
+            );
           } else if (res.status === 404) {
             report(
               false,
               "GitHub commit history",
-              `repo ${owner}/${repo} not found (404) — is it public and spelled correctly?`
+              `GitHub has no public repo at github.com/${owner}/${repo}: either repoUrl in src/profile.ts has a typo, or the repo is private (on GitHub: repo Settings, bottom of General, Change visibility)`
             );
           } else if (!res.ok) {
             report(false, "GitHub commit history", `GitHub API returned HTTP ${res.status}`);
@@ -361,19 +377,38 @@ let profile = null;
               .map((c) => c.commit?.author?.date)
               .filter((d) => d && !Number.isNaN(Date.parse(d)))
               .map((d) => Date.parse(d));
+            const DAY_MS = 24 * 60 * 60 * 1000;
+            const oldest = dates.length ? Math.min(...dates) : Date.now();
+            const readyAt = oldest + DAY_MS;
+            const when = (ms) =>
+              new Date(ms).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              });
+            const steps = `to commit: make a real change, save, then git add -A, git commit -m "Say what changed", and git push (only pushed commits count)`;
             if (dates.length < 5) {
+              const timing =
+                Date.now() < readyAt
+                  ? `; your first commit was ${when(oldest)}, so make at least one of them after ${when(readyAt)}`
+                  : "";
               report(
                 false,
                 "GitHub commit history",
-                `only ${dates.length} commit(s) — need ≥ 5; commit early and often (Station 1.2)`
+                `${dates.length} commit${dates.length === 1 ? "" : "s"} on GitHub — Challenge 1 needs 5, so make ${5 - dates.length} more${timing}; ${steps}`
               );
             } else {
-              const spreadMs = Math.max(...dates) - Math.min(...dates);
-              if (spreadMs < 24 * 60 * 60 * 1000) {
+              const spreadMs = Math.max(...dates) - oldest;
+              if (spreadMs < DAY_MS) {
+                const fix =
+                  Date.now() >= readyAt
+                    ? "that time has passed, so one more commit today does it"
+                    : "commits made before then won't count toward the gap";
                 report(
                   false,
                   "GitHub commit history",
-                  `${dates.length} commits but they span less than 24h — looks like a bulk dump`
+                  `${dates.length} commits, all within ${(spreadMs / 3_600_000).toFixed(1)} hours — Challenge 1 needs at least 24 hours between your first and last commit. Your first was ${when(oldest)}, so you need one more after ${when(readyAt)}; ${fix}; ${steps}`
                 );
               } else {
                 report(
@@ -910,13 +945,529 @@ let challenge3Built = false;
 }
 const challenge3Failures = c3.filter((r) => !r.ok).length;
 
+// ── Challenge 4: runs once your /api/causality/meta answers 200 ─────────────
+// A small reimplementation of the platform's Challenge 4 grader
+// (course-platform/src/lib/challenges/causality.ts and src/lib/causal-math.ts):
+// four fresh datasets, one per hidden structure, each guarded to be decisive.
+const c4 = [];
+function report4(ok, label, detail) {
+  c4.push({ ok, label, detail });
+  const mark = ok ? "\u2713" : "\u2717";
+  console.log(`  ${mark} ${label}`);
+  if (!ok && detail) console.log(`      ${detail}`);
+}
+
+let c4State = (Date.now() ^ 0x85ebca6b) >>> 0;
+function c4Rand() {
+  c4State = (c4State + 0x6d2b79f5) >>> 0;
+  let t = c4State;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const c4Uniform = (a, b) => a + (b - a) * c4Rand();
+function c4Normal(sd = 1) {
+  const u1 = Math.max(c4Rand(), 1e-12);
+  return sd * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * c4Rand());
+}
+const c4Mean = (ys) => ys.reduce((a, b) => a + b, 0) / ys.length;
+const c4Naive = (rows) =>
+  c4Mean(rows.filter((r) => r.x === 1).map((r) => r.y)) - c4Mean(rows.filter((r) => r.x === 0).map((r) => r.y));
+function c4Strat(rows) {
+  let w = 0;
+  for (const z of [0, 1]) {
+    const slice = rows.filter((r) => r.z === z);
+    w += c4Naive(slice) * slice.length;
+  }
+  return w / rows.length;
+}
+
+function c4Rows(structure) {
+  const rows = [];
+  const sign = c4Rand() < 0.5 ? 1 : -1;
+  const base = 30;
+  const push = (x, z, y) => rows.push({ x, z, y: Math.round(y * 1000) / 1000 });
+  for (let i = 0; i < 240; i++) {
+    if (structure === "fork") {
+      const z = c4Rand() < 0.5 ? 1 : 0;
+      const x = c4Rand() < (z === 1 ? 0.24 : 0.76) ? 1 : 0;
+      push(x, z, base + sign * 2.2 * z + c4Normal());
+    } else if (structure === "pipe") {
+      const x = c4Rand() < 0.5 ? 1 : 0;
+      const z = c4Rand() < (x === 1 ? 0.8 : 0.2) ? 1 : 0;
+      push(x, z, base + sign * 2.2 * z + c4Normal());
+    } else if (structure === "collider") {
+      const x = c4Rand() < 0.5 ? 1 : 0;
+      const dev = c4Normal();
+      const z = 1.5 * (x - 0.5) + sign * 1.5 * dev + c4Normal(0.6) > 0 ? 1 : 0;
+      push(x, z, base + dev);
+    } else {
+      const x = c4Rand() < 0.5 ? 1 : 0;
+      const z = c4Rand() < 0.5 ? 1 : 0;
+      push(x, z, base + sign * 1.4 * x + c4Normal());
+    }
+  }
+  return rows;
+}
+
+function c4Decisive(structure, rows) {
+  for (const z of [0, 1]) for (const x of [0, 1]) if (rows.filter((r) => r.z === z && r.x === x).length < 15) return false;
+  const a = Math.abs(c4Naive(rows));
+  const s = Math.abs(c4Strat(rows));
+  if (structure === "fork") return a >= 0.6 && s <= 0.15;
+  if (structure === "pipe") return a >= 0.6 && s <= 0.15;
+  if (structure === "collider") return a <= 0.15 && s >= 0.6;
+  return a >= 0.6 && s >= 0.6 && Math.abs(c4Naive(rows) - c4Strat(rows)) <= 0.15;
+}
+
+const C4_STORIES = {
+  fork: ["severity", "before-x", true, "surgeon", "Doc Dreamy", "Doc Duck", "high", "low", "symptom score"],
+  pipe: ["fungus", "after-x", false, "treatment", "unsprayed", "sprayed", "present", "absent", "growth (cm)"],
+  collider: ["offer", "after-x", false, "interview", "ordinary", "standout", "no", "yes", "reference score"],
+  direct: ["device", "before-x", false, "checkoutFlow", "old", "new", "desktop", "mobile", "basket size ($)"],
+};
+
+const C4_PROBES = ["fork", "pipe", "collider", "direct"].map((structure, i) => {
+  let rows = c4Rows(structure);
+  for (let k = 0; k < 400 && !c4Decisive(structure, rows); k++) rows = c4Rows(structure);
+  const [zLabel, zTiming, zInfluencesX, xLabel, x0, x1, z0, z1, yLabel] = C4_STORIES[structure];
+  return {
+    probe: {
+      probeId: `selfcheck-audit-${i + 1}`,
+      type: "causality-audit",
+      context: {
+        narrative: `Selfcheck sample: does ${xLabel} change ${yLabel}?`,
+        xLabel, x0, x1, zLabel, z0, z1, yLabel,
+        domainFacts: { zTiming, zInfluencesX },
+      },
+      candidateDAGs: [],
+      dataset: rows,
+    },
+    truth: {
+      structure,
+      causal: structure === "pipe" || structure === "direct",
+      advice: structure === "fork" ? "stratify" : "do-not-stratify",
+      stratified: c4Strat(rows),
+    },
+  };
+});
+
+function gradeAudit(truth, ans) {
+  if (!["fork", "pipe", "collider", "direct"].includes(ans?.structure)) return "`structure` must be fork, pipe, collider, or direct";
+  if (typeof ans.causal !== "boolean") return "`causal` must be true or false";
+  if (!["stratify", "do-not-stratify", "randomize"].includes(ans.advice)) return '`advice` must be "stratify" or "do-not-stratify"';
+  const effect = asNum(ans.stratifiedEffect);
+  if (effect === null) return "`stratifiedEffect` must be a number";
+  if (typeof ans.reasoning !== "string" || ans.reasoning.trim().length < 10) return "`reasoning` must be a short plain-language sentence";
+  if (ans.structure !== truth.structure) return `structure "${ans.structure}", correct is "${truth.structure}"`;
+  if (ans.causal !== truth.causal) return `causal ${ans.causal}, correct is ${truth.causal}`;
+  const adviceOk = truth.advice === "stratify" ? ans.advice !== "do-not-stratify" : ans.advice === "do-not-stratify";
+  if (!adviceOk) return `advice "${ans.advice}", correct is "${truth.advice}"`;
+  if (truth.structure === "fork" && Math.abs(effect - truth.stratified) > 0.05) {
+    return `stratifiedEffect ${effect} is outside \u00b10.05 of the correct value`;
+  }
+  return null;
+}
+
+let challenge4Built = false;
+{
+  const res = await get("/api/causality/meta");
+  if (res.status === 200) {
+    challenge4Built = true;
+    console.log("\nChallenge 4 checks (your causality auditor is live):");
+
+    // 1. The meta handshake.
+    const body = json(res.text);
+    if (!body || body.service !== "causality") {
+      report4(
+        false,
+        "GET /api/causality/meta",
+        'response must be JSON of the form { service: "causality", specVersion: "1", studentToken }'
+      );
+    } else if (String(body.specVersion) !== "1") {
+      report4(false, "GET /api/causality/meta", `specVersion must be "1" (got "${String(body.specVersion)}")`);
+    } else if (!body.studentToken || body.studentToken === "SITE_TOKEN-env-var-not-set") {
+      report4(
+        false,
+        "GET /api/causality/meta",
+        "studentToken is missing: the route must return process.env.SITE_TOKEN, and that env var must be set"
+      );
+    } else if (token && body.studentToken !== token) {
+      report4(
+        false,
+        "GET /api/causality/meta",
+        `the site's studentToken ("${body.studentToken}") doesn't match your local SITE_TOKEN ("${token}")`
+      );
+    } else {
+      report4(true, "GET /api/causality/meta: service announced, token present");
+    }
+
+    // 2. Four decide probes, one per structure. The platform's battery sends 24.
+    let lastAnswer = null;
+    const misses = [];
+    let correct = 0;
+    for (const { probe, truth } of C4_PROBES) {
+      const r = await get("/api/causality/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(probe),
+      });
+      let miss;
+      let answer = null;
+      if (r.error) {
+        miss = r.error;
+      } else if (!r.ok) {
+        miss = `HTTP ${r.status}${json(r.text)?.error ? `: ${json(r.text).error}` : ""}`;
+      } else {
+        answer = json(r.text);
+        miss = answer === null ? "response was not valid JSON" : gradeAudit(truth, answer);
+      }
+      if (miss === null) correct += 1;
+      else misses.push(`${probe.probeId} (${truth.structure}): ${miss}`);
+      lastAnswer = answer;
+    }
+    if (correct === C4_PROBES.length) {
+      report4(true, `POST /api/causality/decide: ${correct}/${C4_PROBES.length} sample probes correct`);
+    } else {
+      report4(
+        false,
+        `POST /api/causality/decide: ${correct}/${C4_PROBES.length} sample probes correct`,
+        `first miss ${misses[0]} (run npm run try-causality for a side-by-side of yours vs correct)`
+      );
+    }
+
+    // 3. The /causality page displays the answer the API just gave, plus the DAG.
+    const page = await get("/causality");
+    if (page.error || !page.ok) {
+      report4(false, "GET /causality", page.error ?? `returned HTTP ${page.status}`);
+    } else {
+      const readAttr = (key) => {
+        const m = page.text.match(new RegExp(`<[^>]*data-causality="${key}"[^>]*>([^<]*)<`));
+        return m ? m[1].trim() : null;
+      };
+      const problems = [];
+      const shownStructure = readAttr("structure");
+      if (!shownStructure) {
+        problems.push('no element with data-causality="structure"');
+      } else if (lastAnswer && shownStructure.toLowerCase() !== String(lastAnswer.structure).toLowerCase()) {
+        problems.push(`data-causality="structure" shows "${shownStructure}" but the API just answered "${lastAnswer.structure}"`);
+      }
+      const shownVerdict = readAttr("verdict");
+      if (!shownVerdict) {
+        problems.push('no element with data-causality="verdict"');
+      } else if (lastAnswer && typeof lastAnswer.causal === "boolean") {
+        const saysCausal = /\bcausal\b/i.test(shownVerdict) && !/\bnot[\s-]?causal\b/i.test(shownVerdict);
+        if (saysCausal !== lastAnswer.causal) {
+          problems.push(`data-causality="verdict" shows "${shownVerdict}" but the API just answered causal=${lastAnswer.causal}`);
+        }
+      }
+      const shownEffect = readAttr("stratified-effect");
+      const answeredEffect = asNum(lastAnswer?.stratifiedEffect);
+      if (!shownEffect) {
+        problems.push('no element with data-causality="stratified-effect"');
+      } else if (answeredEffect !== null) {
+        const shownNum = Number.parseFloat(shownEffect.replace(/[$,%\s]/g, ""));
+        if (!Number.isFinite(shownNum) || Math.abs(shownNum - answeredEffect) > 0.011) {
+          problems.push(`data-causality="stratified-effect" shows "${shownEffect}" but the API just answered ${answeredEffect}`);
+        }
+      }
+
+      const imgTag = page.text.match(/<img\b[^>]*data-causality="dag"[^>]*>/);
+      const src = imgTag ? (imgTag[0].match(/\bsrc="([^"]*)"/)?.[1] ?? "").replace(/&amp;/g, "&") : null;
+      if (src === null) {
+        problems.push('no <img data-causality="dag"> (Step 5 of the build guide draws the four DAGs)');
+      } else if (!src) {
+        problems.push('the data-causality="dag" image has an empty src');
+      } else {
+        const img = await get(new URL(src, `${siteUrl}/causality`).href);
+        if (img.error || !img.ok) {
+          problems.push(`the DAG image at "${src}" did not load (${img.error ?? `HTTP ${img.status}`})`);
+        } else if (!img.contentType.toLowerCase().startsWith("image/")) {
+          problems.push(`the DAG image at "${src}" is not an image (content-type "${img.contentType}")`);
+        }
+      }
+
+      if (problems.length === 0) {
+        report4(true, "/causality page: shows the latest answer and a DAG image that loads");
+      } else {
+        report4(
+          false,
+          "/causality page bound to live data",
+          `${problems.join("; ")}. The page must render the latest saved answer (lib/causality-store), not fixed text`
+        );
+      }
+    }
+  }
+}
+const challenge4Failures = c4.filter((r) => !r.ok).length;
+
+// ── Challenge 5: runs once your /api/capstone/meta answers 200 ─────────────
+// Sample probes and grading come from scripts/capstone-probes.mjs (shared
+// with try-capstone). The page checks mirror the platform's
+// (course-platform/src/lib/challenges/capstone.ts).
+const c5 = [];
+function report5(ok, label, detail) {
+  c5.push({ ok, label, detail });
+  const mark = ok ? "\u2713" : "\u2717";
+  console.log(`  ${mark} ${label}`);
+  if (!ok && detail) console.log(`      ${detail}`);
+}
+
+let challenge5Built = false;
+{
+  const res = await get("/api/capstone/meta");
+  if (res.status === 200) {
+    challenge5Built = true;
+    console.log("\nChallenge 5 checks (your capstone service is live):");
+    const C5_DOMAINS = ["staffing", "inventory", "pricing", "channels"];
+
+    // 1. The meta handshake, with the declared domain.
+    const body = json(res.text);
+    let domain = null;
+    if (!body || body.service !== "capstone") {
+      report5(
+        false,
+        "GET /api/capstone/meta",
+        'response must be JSON of the form { service: "capstone", specVersion: "2", studentToken, domain }'
+      );
+    } else if (String(body.specVersion) !== "2") {
+      report5(false, "GET /api/capstone/meta", `specVersion must be "2" (got "${String(body.specVersion)}")`);
+    } else if (!body.studentToken || body.studentToken === "SITE_TOKEN-env-var-not-set") {
+      report5(
+        false,
+        "GET /api/capstone/meta",
+        "studentToken is missing: the route must return process.env.SITE_TOKEN, and that env var must be set"
+      );
+    } else if (token && body.studentToken !== token) {
+      report5(
+        false,
+        "GET /api/capstone/meta",
+        `the site's studentToken ("${body.studentToken}") doesn't match your local SITE_TOKEN ("${token}")`
+      );
+    } else if (!C5_DOMAINS.includes(body.domain)) {
+      report5(
+        false,
+        "GET /api/capstone/meta",
+        `domain must be one of ${C5_DOMAINS.join(", ")} (got "${String(body.domain)}")`
+      );
+    } else {
+      domain = body.domain;
+      report5(true, `GET /api/capstone/meta: service announced, token present, domain "${domain}"`);
+    }
+
+    let probes = null;
+    if (domain) {
+      try {
+        probes = await import("./capstone-probes.mjs");
+      } catch {
+        report5(
+          false,
+          "scripts/capstone-probes.mjs",
+          "this file is missing; copy it from the course template on GitHub (the build guide's Before you build section)"
+        );
+      }
+    }
+
+    if (domain && probes) {
+      // 2. Your own problem, then two practice problems. The platform's
+      // battery sends your problem plus 14 test problems.
+      const mine = probes.readMyProblem();
+      let myAnswer = null;
+      if (!mine) {
+        report5(
+          false,
+          `POST /api/capstone/decide: your problem`,
+          `no ${probes.MY_PROBLEM_FILE} in the project folder; download it from the Capstone page on the course platform`
+        );
+      } else if (mine.domain !== domain) {
+        report5(
+          false,
+          `POST /api/capstone/decide: your problem`,
+          `${probes.MY_PROBLEM_FILE} is for "${mine.domain}" but your meta route declares "${domain}"; download the file for your domain`
+        );
+      } else {
+        const { answer, error } = await probes.askSite(siteUrl, mine);
+        let miss = error ?? null;
+        if (!miss) {
+          try {
+            miss = await probes.checkAnswer(mine, answer);
+          } catch (err) {
+            miss = err instanceof Error ? err.message : String(err);
+          }
+        }
+        if (miss === null) {
+          myAnswer = answer;
+          report5(true, "POST /api/capstone/decide: your problem answered correctly");
+        } else {
+          report5(false, "POST /api/capstone/decide: your problem", `${miss} (run npm run try-capstone for details)`);
+        }
+      }
+
+      let practice = [];
+      try {
+        practice = await probes.fetchPractice(domain, 2);
+      } catch (err) {
+        report5(false, "practice problems", err instanceof Error ? err.message : String(err));
+      }
+      if (practice.length > 0) {
+        const misses = [];
+        for (const [i, { probe }] of practice.entries()) {
+          const { answer, error } = await probes.askSite(siteUrl, probe);
+          let miss = error ?? null;
+          if (!miss) {
+            try {
+              miss = await probes.checkAnswer(probe, answer);
+            } catch (err) {
+              miss = err instanceof Error ? err.message : String(err);
+            }
+          }
+          if (miss !== null) misses.push(`practice ${i + 1}: ${miss}`);
+        }
+        const correct = practice.length - misses.length;
+        if (misses.length === 0) {
+          report5(true, `POST /api/capstone/decide: ${correct}/${practice.length} practice problems correct`);
+        } else {
+          report5(
+            false,
+            `POST /api/capstone/decide: ${correct}/${practice.length} practice problems correct`,
+            `first miss ${misses[0]} (run npm run try-capstone for yours next to the correct numbers)`
+          );
+        }
+      }
+
+      // 3. The /capstone report shows your own problem and the answer the
+      // API just gave for it.
+      const page = myAnswer ? await get("/capstone") : null;
+      if (page && (page.error || !page.ok)) {
+        report5(false, "GET /capstone", page.error ?? `returned HTTP ${page.status}`);
+      } else if (page) {
+        const strip = (html) => html.replace(/<[^>]*>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+        // The text inside the first element carrying data-capstone="key",
+        // including text in nested tags.
+        const inner = (key) => {
+          const open = page.text.match(new RegExp(`<([a-zA-Z0-9]+)\\b[^>]*data-capstone="${key}"[^>]*>`));
+          if (!open) return null;
+          const tag = open[1];
+          const from = open.index + open[0].length;
+          let depth = 1;
+          const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "g");
+          re.lastIndex = from;
+          let m;
+          while ((m = re.exec(page.text))) {
+            depth += m[1] ? -1 : 1;
+            if (depth === 0) return page.text.slice(from, m.index);
+          }
+          return page.text.slice(from);
+        };
+        const readAttr = (key) => {
+          const html = inner(key);
+          return html === null ? null : strip(html);
+        };
+        const openTag = (key) => page.text.match(new RegExp(`<[^>]*data-capstone="${key}"[^>]*>`))?.[0] ?? null;
+        const share = (text) => {
+          const t = text.replace(/,/g, "");
+          const inN = /(\d+(?:\.\d+)?)\s*(?:in|out of)\s*(\d+)/i.exec(t);
+          if (inN) return Number(inN[1]) / Number(inN[2]);
+          const pc = /(\d+(?:\.\d+)?)\s*%/.exec(t);
+          if (pc) return Number(pc[1]) / 100;
+          const num = /\d*\.?\d+/.exec(t);
+          if (!num) return null;
+          const v = Number(num[0]);
+          return v > 1 ? v / 100 : v;
+        };
+        const problems = [];
+        const rec = readAttr("recommendation");
+        if (rec === null || rec.length < 15) {
+          problems.push('data-capstone="recommendation" must hold your recommendation as a real sentence');
+        }
+        const shownAction = readAttr("action");
+        if (!shownAction) {
+          problems.push('no element with data-capstone="action"');
+        } else if (shownAction.toLowerCase() !== String(myAnswer.action).toLowerCase()) {
+          problems.push(`data-capstone="action" shows "${shownAction}" but the API just answered "${myAnswer.action}"`);
+        }
+        const chosen = myAnswer.outcomes?.[myAnswer.action] ?? {};
+        const shownTypical = readAttr("typical-result");
+        const answeredTypical = asNum(chosen.typical);
+        if (!shownTypical) {
+          problems.push('no element with data-capstone="typical-result"');
+        } else if (answeredTypical !== null) {
+          const n = Number.parseFloat(shownTypical.replace(/[$,\s]/g, ""));
+          if (!Number.isFinite(n) || Math.abs(n - answeredTypical) > Math.max(1, Math.abs(answeredTypical) * 0.0075)) {
+            problems.push(`data-capstone="typical-result" shows "${shownTypical}" but the API just answered ${Math.round(answeredTypical)}`);
+          }
+        }
+        const shownChance = readAttr("chance-short");
+        const answeredChance = asNum(chosen.chanceShort);
+        if (!shownChance) {
+          problems.push('no element with data-capstone="chance-short"');
+        } else if (answeredChance !== null) {
+          const v = share(shownChance);
+          if (v === null || Math.abs(v - answeredChance) > 0.01) {
+            problems.push(`data-capstone="chance-short" shows "${shownChance}" but the API just answered ${Math.round(answeredChance * 1000) / 10}%`);
+          }
+        }
+        const chartTag = openTag("all-data-chart");
+        const points = chartTag ? Number.parseInt(chartTag.match(/data-points="(\d+)"/)?.[1] ?? "", 10) : NaN;
+        if (!chartTag) {
+          problems.push('no element with data-capstone="all-data-chart"');
+        } else if (points !== mine.history.length) {
+          problems.push(`data-capstone="all-data-chart" must have data-points="${mine.history.length}" (the rows in your problem); got "${Number.isFinite(points) ? points : "nothing"}"`);
+        }
+        const outcomeHtml = inner("outcome-chart");
+        const outcomeTag = openTag("outcome-chart") ?? "";
+        if (outcomeHtml === null) {
+          problems.push('no element with data-capstone="outcome-chart"');
+        } else if (!/<(svg|img|canvas)\b/i.test(outcomeHtml) && !/^<(svg|img|canvas)\b/i.test(outcomeTag)) {
+          problems.push('data-capstone="outcome-chart" must contain the chart itself (an svg or img)');
+        }
+        const dagTag = openTag("dag");
+        const nodes = dagTag ? Number.parseInt(dagTag.match(/data-nodes="(\d+)"/)?.[1] ?? "", 10) : NaN;
+        if (!dagTag) {
+          problems.push('no element with data-capstone="dag"');
+        } else if (nodes !== mine.dag.nodes.length) {
+          problems.push(`data-capstone="dag" must have data-nodes="${mine.dag.nodes.length}" (the nodes in your recipe); got "${Number.isFinite(nodes) ? nodes : "nothing"}"`);
+        }
+        const unc = readAttr("uncertainty");
+        if (unc === null || unc.length < 20 || !/\d/.test(unc)) {
+          problems.push('data-capstone="uncertainty" must say how sure the reader can be, in plain words, with at least one number');
+        }
+        const bodyText = strip(page.text.replace(/<(script|style|noscript)\b[\s\S]*?<\/\1>/gi, " "));
+        const jargon = [
+          ["Greek letters", /[\u0391-\u03A9\u03B1-\u03C9]/],
+          ["Greek letter names", /\b(sigma|lambda|theta)\b/i],
+          ["p-values", /\bp[\s-]?values?\b|\bp\s*[<>=\u2264]\s*0?\.\d/i],
+          ['"statistically significant"', /statistical(ly)?\s+significan/i],
+          ["distribution names", /\b(poisson|gaussian|bernoulli|binomial|normal distribution|normally distributed|uniform distribution)\b/i],
+          ["distribution parameters", /\b(standard deviation|std\.? dev|variance)\b/i],
+          ['"percentile"', /percentile/i],
+          ['"bootstrap"', /bootstrap/i],
+        ].filter(([, re]) => re.test(bodyText)).map(([label]) => label);
+        if (jargon.length > 0) {
+          problems.push(`the page uses words the reader should not see: ${jargon.join(", ")}`);
+        }
+        if (problems.length === 0) {
+          report5(true, "/capstone report: shows your problem, both outcome charts, the recipe, and plain words");
+        } else {
+          report5(
+            false,
+            "/capstone report bound to live data",
+            `${problems.join("; ")}. The page must be built from loadLatest() and simulateAll(), not fixed text`
+          );
+        }
+      }
+    }
+  }
+}
+const challenge5Failures = c5.filter((r) => !r.ok).length;
+
 // ── Later-lane stubs: these SHOULD fail until their lane ────────────────────
 console.log("\nLater-lane stubs (these should NOT pass yet — 501 is correct):");
 const stubs = [
   ...(challenge2Built ? [] : [["/api/reasoning/meta", "Lane 2"]]),
   ...(challenge3Built ? [] : [["/api/simulator/meta", "Lane 3"]]),
-  ["/api/causality/meta", "Lane 4"],
-  ["/api/capstone/meta", "Lane 5"],
+  ...(challenge4Built ? [] : [["/api/causality/meta", "Lane 4"]]),
+  ...(challenge5Built ? [] : [["/api/capstone/meta", "Lane 5"]]),
 ];
 let stubProblems = 0;
 for (const [path, lane] of stubs) {
@@ -935,8 +1486,21 @@ for (const [path, lane] of stubs) {
 
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log("");
-if (challenge1Failures === 0 && challenge2Failures === 0 && challenge3Failures === 0 && stubProblems === 0) {
-  if (challenge3Built) {
+if (
+  challenge1Failures === 0 &&
+  challenge2Failures === 0 &&
+  challenge3Failures === 0 &&
+  challenge4Failures === 0 &&
+  challenge5Failures === 0 &&
+  stubProblems === 0
+) {
+  if (challenge5Built) {
+    console.log("All Challenge 1 to 5 checks pass. Deploy, then run the real probe");
+    console.log("battery from the Capstone page on the course platform.");
+  } else if (challenge4Built) {
+    console.log("All Challenge 1, 2, 3, and 4 checks pass. Deploy, then run the real");
+    console.log("probe battery from the Challenge 4 page on the course platform.");
+  } else if (challenge3Built) {
     console.log("All Challenge 1, 2, and 3 checks pass. Deploy, then run the real");
     console.log("probe battery from the Challenge 3 page on the course platform.");
   } else if (challenge2Built) {
@@ -959,6 +1523,12 @@ if (challenge1Failures === 0 && challenge2Failures === 0 && challenge3Failures =
   }
   if (challenge3Failures > 0) {
     parts.push(`${challenge3Failures} Challenge 3 check${challenge3Failures === 1 ? "" : "s"}`);
+  }
+  if (challenge4Failures > 0) {
+    parts.push(`${challenge4Failures} Challenge 4 check${challenge4Failures === 1 ? "" : "s"}`);
+  }
+  if (challenge5Failures > 0) {
+    parts.push(`${challenge5Failures} Challenge 5 check${challenge5Failures === 1 ? "" : "s"}`);
   }
   if (stubProblems > 0) {
     parts.push(`${stubProblems} stub problem${stubProblems === 1 ? "" : "s"}`);
